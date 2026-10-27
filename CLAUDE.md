@@ -8,8 +8,5 @@ Read `FOLIO_SPEC.md` first. It defines the scope and, just as important, what Fo
 - Keep it one self-contained HTML file that runs offline.
 - Stay inside the spec's scope. Raise new feature ideas with me instead of building them.
 
-## Open question
-There are two versions: `folio.html` (tracked, with uncommitted edits) and `index.html` (untracked). Ask me which is current before editing, then remove or rename the other.
-
 ## Run
-Open the HTML file directly in a browser. Remote: github.com/willycraig1/Folio.
+`folio.html` is the app. Open it directly in a browser. Remote: github.com/willycraig1/Folio (no GitHub Pages site).

@@ -72,8 +72,7 @@ header{background:#1e3a8a;height:46px;display:flex;align-items:center;gap:8px;pa
   box-shadow:inset 0 0 0 1.5px rgba(37,99,235,.25);
   border-radius:1px;
 }
-.body-frame p{margin:0;min-height:1.4em}
-.body-frame p+p{margin-top:.15em}
+.body-frame p{min-height:1.4em}
 .body-frame.body-editing:empty::before{content:'Start typing…';color:#cbd5e1;pointer-events:none}
 .body-has-overflow::after{
   content:'▼ continues';position:absolute;bottom:2px;right:6px;
@@ -365,18 +364,17 @@ function paginateFlow() {
   const frameH = (size.h - MARGIN_PT*2) * BS;
   const ruler = document.getElementById('flow-ruler');
   ruler.style.width = frameW + 'px';
-  ruler.style.fontFamily = DEFAULT_BODY_STYLE.fontFamily;
-  ruler.style.fontSize = (DEFAULT_BODY_STYLE.fontSize * BS) + 'px';
-  ruler.style.lineHeight = DEFAULT_BODY_STYLE.lineHeight;
 
   const pages = [];
   let currentParas = [];
   let usedH = 0;
 
   for (const para of doc.flow.paragraphs) {
-    const h = measureParaH(para, ruler, frameW);
-    const spaceAfter = (para.spaceAfter || 8) * BS / BS; // keep in px for now
-    const totalH = h + (para.spaceBefore || 0) * BS + spaceAfter * BS;
+    // measureParaH returns pure content height (no margins) so we add spacing once
+    const contentH = measureParaH(para, ruler);
+    const spaceB = (para.spaceBefore || DEFAULT_BODY_STYLE.spaceBefore) * BS;
+    const spaceA = (para.spaceAfter  || DEFAULT_BODY_STYLE.spaceAfter)  * BS;
+    const totalH = contentH + spaceB + spaceA;
 
     if (currentParas.length > 0 && usedH + totalH > frameH) {
       pages.push(currentParas);
@@ -391,19 +389,27 @@ function paginateFlow() {
   return pages;
 }
 
-function measureParaH(para, ruler, frameW) {
-  ruler.innerHTML = paraToHtml(para);
+// Measures only content height — no margins — so paginateFlow can add spacing once
+function measureParaH(para, ruler) {
+  const ff  = para.fontFamily  || DEFAULT_BODY_STYLE.fontFamily;
+  const fs  = (para.fontSize   || DEFAULT_BODY_STYLE.fontSize) * BS;
+  const lh  = para.lineHeight  || DEFAULT_BODY_STYLE.lineHeight;
+  const text = (para.text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;') || '<br>';
+  ruler.innerHTML = `<p style="font-family:${ff};font-size:${fs}px;line-height:${lh};margin:0;padding:0">${text}</p>`;
   return ruler.scrollHeight;
 }
 
 function paraToHtml(para) {
+  const spaceB = (para.spaceBefore || DEFAULT_BODY_STYLE.spaceBefore) * BS;
+  const spaceA = (para.spaceAfter  || DEFAULT_BODY_STYLE.spaceAfter)  * BS;
   const s = [
     `font-family:${para.fontFamily||DEFAULT_BODY_STYLE.fontFamily}`,
     `font-size:${(para.fontSize||DEFAULT_BODY_STYLE.fontSize)*BS}px`,
     `line-height:${para.lineHeight||DEFAULT_BODY_STYLE.lineHeight}`,
     `color:${para.color||DEFAULT_BODY_STYLE.color}`,
     `text-align:${para.align||'left'}`,
-    `margin-bottom:${(para.spaceAfter||8)*BS/BS}px`,
+    `margin-top:${spaceB}px`,
+    `margin-bottom:${spaceA}px`,
   ].join(';');
   return `<p style="${s}">${(para.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;') || '<br>'}</p>`;
 }
@@ -587,20 +593,31 @@ function renderBodyFrame(pageDom, pi, paras) {
     if (!frame.innerHTML.trim()) frame.innerHTML = '<p><br></p>';
     frame.addEventListener('input', () => onBodyInput(pi));
     frame.addEventListener('keydown', e => onBodyKeydown(e, pi));
-    frame.addEventListener('blur', e => {
-      // Delay to allow click-to-select-element to happen first
-      setTimeout(() => exitBodyEdit(), 100);
+    frame.addEventListener('blur', () => {
+      setTimeout(() => {
+        // Don't exit if focus moved to a toolbar/panel control or back into the frame
+        const active = document.activeElement;
+        if (!active) return;
+        if (active === frame || frame.contains(active)) return;
+        const inUI = active.closest('#toolbar,#props-panel,#sidebar');
+        if (inUI) return;
+        exitBodyEdit();
+      }, 150);
     });
   } else {
     frame.innerHTML = paras.map(p => paraToHtml(p)).join('') || '';
   }
 
-  // Check overflow
+  // Check overflow using the same accounting as paginateFlow
   if (paras.length > 0) {
     const ruler = document.getElementById('flow-ruler');
     ruler.style.width = frameW + 'px';
     let totalH = 0;
-    for (const p of paras) totalH += measureParaH(p, ruler, frameW);
+    for (const p of paras) {
+      totalH += measureParaH(p, ruler)
+             + (p.spaceBefore || DEFAULT_BODY_STYLE.spaceBefore) * BS
+             + (p.spaceAfter  || DEFAULT_BODY_STYLE.spaceAfter)  * BS;
+    }
     if (totalH > frameH) frame.classList.add('body-has-overflow');
   }
 
@@ -620,12 +637,16 @@ function renderBodyFrame(pageDom, pi, paras) {
 }
 
 function paraToEditHtml(para) {
+  const spaceB = (para.spaceBefore || DEFAULT_BODY_STYLE.spaceBefore) * BS;
+  const spaceA = (para.spaceAfter  || DEFAULT_BODY_STYLE.spaceAfter)  * BS;
   const s = [
     `font-family:${para.fontFamily||DEFAULT_BODY_STYLE.fontFamily}`,
     `font-size:${(para.fontSize||DEFAULT_BODY_STYLE.fontSize)*BS}px`,
     `line-height:${para.lineHeight||DEFAULT_BODY_STYLE.lineHeight}`,
     `color:${para.color||DEFAULT_BODY_STYLE.color}`,
     `text-align:${para.align||'left'}`,
+    `margin-top:${spaceB}px`,
+    `margin-bottom:${spaceA}px`,
   ].join(';');
   return `<p style="${s}" data-para-id="${para.id}">${(para.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;') || '<br>'}</p>`;
 }
@@ -642,26 +663,27 @@ function enterBodyEdit(pi, clientX, clientY) {
   // Re-render to activate editing on this page
   renderAllPages();
   renderThumbs();
+  updateProps();
 
-  const frame = getPageEl(pi).querySelector('.body-frame');
-  if (!frame) return;
-  frame.focus();
-
-  // Try to place cursor near click position
-  if (clientX !== undefined && document.caretRangeFromPoint) {
-    const range = document.caretRangeFromPoint(clientX, clientY);
-    if (range && frame.contains(range.startContainer)) {
-      const sel2 = window.getSelection();
-      sel2.removeAllRanges();
-      sel2.addRange(range);
+  // Defer focus so the browser finishes event processing before we steal it
+  requestAnimationFrame(() => {
+    const frame = getPageEl(pi)?.querySelector('.body-frame');
+    if (!frame || bodyEditPi !== pi) return;
+    frame.focus();
+    // Try to place cursor near click position
+    if (clientX !== undefined && document.caretRangeFromPoint) {
+      const range = document.caretRangeFromPoint(clientX, clientY);
+      if (range && frame.contains(range.startContainer)) {
+        const sel2 = window.getSelection();
+        sel2.removeAllRanges();
+        sel2.addRange(range);
+      } else {
+        placeCaretAtEnd(frame);
+      }
     } else {
       placeCaretAtEnd(frame);
     }
-  } else {
-    placeCaretAtEnd(frame);
-  }
-
-  updateProps();
+  });
 }
 
 function exitBodyEdit() {
@@ -983,6 +1005,7 @@ function onPageMD(e, pageDom, pi) {
 
   // Click on the click zone → enter body edit
   if (clickZone && tool === 'select') {
+    e.preventDefault(); // prevent browser focus reset mid-event
     sel = [];
     enterBodyEdit(pi, e.clientX, e.clientY);
     return;
